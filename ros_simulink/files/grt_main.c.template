@@ -1,0 +1,465 @@
+#compiler-settings
+directiveStartToken = %
+commentStartToken = #+#
+#end compiler-settings
+/* Copyright 1994-2005 The MathWorks, Inc.
+ *
+ * File    : grt_main.c
+ *
+ * Abstract:
+ *      A Generic "Real-Time (single tasking or pseudo-multitasking,
+ *      statically allocated data)" main that runs under most
+ *      operating systems.
+ *
+ *      This file may be a useful starting point when targeting a new
+ *      processor or microcontroller.
+ *
+ *
+ * Compiler specified defines:
+ *	RT              - Required.
+ *      MODEL=modelname - Required.
+ *	NUMST=#         - Required. Number of sample times.
+ *	NCSTATES=#      - Required. Number of continuous states.
+ *      TID01EQ=1 or 0  - Optional. Only define to 1 if sample time task
+ *                        id's 0 and 1 have equal rates.
+ *      MULTITASKING    - Optional. (use MT for a synonym).
+ *	SAVEFILE        - Optional (non-quoted) name of .mat file to create.
+ *			  Default is <MODEL>.mat
+ *      BORLAND         - Required if using Borland C/C++
+ */
+#include <rtw/grt_main.h>
+#include <float.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "rtwtypes.h"
+#include "rtmodel.h"
+#include "rt_sim.h"
+#include "rt_logging.h"
+#ifdef UseMMIDataLogging
+#include "rt_logging_mmi.h"
+#endif
+#include "rt_nonfinite.h"
+
+/* Signal Handler header */
+#ifdef BORLAND
+#include <signal.h>
+#include <float.h>
+#endif
+
+#include "ext_work.h"
+
+
+
+/*=========*
+ * Defines *
+ *=========*/
+
+#ifndef TRUE
+#define FALSE (0)
+#define TRUE  (1)
+#endif
+
+#ifndef EXIT_FAILURE
+#define EXIT_FAILURE  1
+#endif
+#ifndef EXIT_SUCCESS
+#define EXIT_SUCCESS  0
+#endif
+
+#define QUOTE1(name) #name
+#define QUOTE(name) QUOTE1(name)    /* need to expand name    */
+
+#ifndef RT
+# error "must define RT"
+#endif
+
+#ifndef MODEL
+# error "must define MODEL"
+#endif
+
+#ifndef NUMST
+# error "must define number of sample times, NUMST"
+#endif
+
+#ifndef NCSTATES
+# error "must define NCSTATES"
+#endif
+
+#ifndef SAVEFILE
+# define MATFILE2(file) #file ".mat"
+# define MATFILE1(file) MATFILE2(file)
+# define MATFILE MATFILE1(MODEL)
+#else
+# define MATFILE QUOTE(SAVEFILE)
+#endif
+
+#define RUN_FOREVER -1.0
+
+#define EXPAND_CONCAT(name1,name2) name1 ## name2
+#define CONCAT(name1,name2) EXPAND_CONCAT(name1,name2)
+#define RT_MODEL            CONCAT(MODEL,_rtModel)
+
+/*====================*
+ * External functions *
+ *====================*/
+
+#ifdef __cplusplus
+
+extern "C" {
+
+#endif
+
+extern RT_MODEL *MODEL(void);
+
+extern void MdlInitializeSizes(void);
+extern void MdlInitializeSampleTimes(void);
+extern void MdlStart(void);
+extern void MdlOutputs(int_T tid);
+extern void MdlUpdate(int_T tid);
+extern void MdlTerminate(void);
+
+#ifdef __cplusplus
+
+}
+#endif
+
+
+
+#if NCSTATES > 0
+#ifdef __cplusplus
+
+extern "C" {
+
+#endif
+	extern void rt_ODECreateIntegrationData(RTWSolverInfo *si);
+	extern void rt_ODEUpdateContinuousStates(RTWSolverInfo *si);
+#ifdef __cplusplus
+
+}
+#endif
+
+# define rt_CreateIntegrationData(S) \
+	  rt_ODECreateIntegrationData(rtmGetRTWSolverInfo(S));
+# define rt_UpdateContinuousStates(S) \
+	  rt_ODEUpdateContinuousStates(rtmGetRTWSolverInfo(S));
+# else
+# define rt_CreateIntegrationData(S)  \
+	    rtsiSetSolverName(rtmGetRTWSolverInfo(S),"FixedStepDiscrete");
+# define rt_UpdateContinuousStates(S) /* Do Nothing */
+#endif
+
+
+/*==================================*
+ * Global data local to this module *
+ *==================================*/
+
+static struct {
+  int_T    stopExecutionFlag;
+  int_T    isrOverrun;
+  int_T    overrunFlags[NUMST];
+  int_T    eventFlags[NUMST];
+  const    char_T *errmsg;
+} GBLbuf;
+
+static char errorMsg[200];
+
+
+#ifdef EXT_MODE
+#  define rtExtModeSingleTaskUpload(S)                          \
+   {                                                            \
+        int stIdx;                                              \
+        rtExtModeUploadCheckTrigger(rtmGetNumSampleTimes(S));   \
+        for (stIdx=0; stIdx<NUMST; stIdx++) {                   \
+            if (rtmIsSampleHit(S, stIdx, 0 /*unused*/)) {       \
+                rtExtModeUpload(stIdx,rtmGetTaskTime(S,stIdx)); \
+            }                                                   \
+        }                                                       \
+   }
+#else
+#  define rtExtModeSingleTaskUpload(S) /* Do nothing */
+#endif
+
+/*=================*
+ * Local functions *
+ *=================*/
+
+#ifdef BORLAND
+/* Implemented for BC++ only*/
+
+typedef void (*fptr)(int, int);
+
+/* Function: divideByZero =====================================================
+ *
+ * Abstract: Traps the error Division by zero and prints a warning
+ *           Also catches other FP errors, but does not identify them
+ *           specifically.
+ */
+void divideByZero(int sigName, int sigType)
+{
+    signal(SIGFPE, (fptr)divideByZero);
+    if ((sigType == FPE_ZERODIVIDE)||(sigType == FPE_INTDIV0)){
+        printf("*** Warning: Division by zero\n\n");
+        return;
+    }
+    else{
+        printf("*** Warning: Floating Point error\n\n");
+        return;
+    }
+} /* end divideByZero */
+
+#endif /* BORLAND */
+
+
+/*
+* Calculate the controller output. Supply input arguments:
+* inputArgs[0] - IMEPn_ref
+* inputArgs[1] - ca50_ref
+* inputArgs[2] - IMEPn
+* inputArgs[3] - PCP
+* inputArgs[4] - PCPD
+* inputArgs[5] - ca50
+* inputArgs[6] - TIn
+*
+* Also supply a pointer to an array capable of containing the following values:
+* outputArgs[0] - fuelA_ratio
+* outputArgs[1] - fuelMEP
+*/
+
+
+
+
+static RT_MODEL *S;
+
+char* getControllerOutput(int nbrInputArgs, double* inputArgs, int nbrOutputArgs, double* outputArgs) 
+{
+	real_T tnext;
+	//autogenerate this numbers !!
+	if (nbrInputArgs != $numofinputs) {
+		sprintf(errorMsg,"nbrInputArgs should be 7 but was %d",
+		nbrInputArgs);
+		return errorMsg;
+	}
+	//autogenerate this numbers !!
+	if (nbrOutputArgs != $numofoutputs) {
+		sprintf(errorMsg, "nbrOutputArgs should be 2 but was %d",
+		nbrOutputArgs);
+		return errorMsg;
+	}
+// autogenerate this
+%set $x = 0
+%for $inp in $inputblocks:
+	${simulinkname}_U.${inp} = inputArgs[${x}];
+%set $x = $x + 1
+%end for
+//
+
+    /***********************************************
+     * Check and see if base step time is too fast *
+     ***********************************************/
+    if (GBLbuf.isrOverrun++) {
+        GBLbuf.stopExecutionFlag = 1;
+		sprintf(errorMsg, "GBLbuf.isrOverrun");
+		return errorMsg;
+    }
+
+    /***********************************************
+     * Check and see if error status has been set  *
+     ***********************************************/
+    if (rtmGetErrorStatus(S) != NULL) {
+        GBLbuf.stopExecutionFlag = 1;
+        sprintf(errorMsg, "rtmGetErrorStatus(S) != null");
+		return errorMsg;
+    }
+
+    /* enable interrupts here */
+
+    /*
+     * In a multi-tasking environment, this would be removed from the base rate
+     * and called as a "background" task.
+     */
+    rtExtModeOneStep(rtmGetRTWExtModeInfo(S),
+                     rtmGetNumSampleTimes(S),
+                     (boolean_T *)&rtmGetStopRequested(S));
+
+    tnext = rt_SimGetNextSampleHit();
+    rtsiSetSolverStopTime(rtmGetRTWSolverInfo(S),tnext);
+
+    MdlOutputs(0);
+
+    rtExtModeSingleTaskUpload(S);
+
+    GBLbuf.errmsg = rt_UpdateTXYLogVars(rtmGetRTWLogInfo(S),
+                                        rtmGetTPtr(S));
+    if (GBLbuf.errmsg != NULL) {
+        GBLbuf.stopExecutionFlag = 1;
+        sprintf(errorMsg, "GBLbuf.errmsg != null");
+		return errorMsg;
+    }
+
+    rt_UpdateSigLogVars(rtmGetRTWLogInfo(S), rtmGetTPtr(S));
+
+    MdlUpdate(0);
+    rt_SimUpdateDiscreteTaskSampleHits(rtmGetNumSampleTimes(S),
+                                       rtmGetTimingData(S),
+                                       rtmGetSampleHitPtr(S),
+                                       rtmGetTPtr(S));
+
+    if (rtmGetSampleTime(S,0) == CONTINUOUS_SAMPLE_TIME) {
+        rt_UpdateContinuousStates(S);
+    }
+
+    GBLbuf.isrOverrun--;
+
+    rtExtModeCheckEndTrigger();
+// GENERATE OUTPUT 
+%set $x = 0
+%for $outp in $outputblocks:
+	outputArgs[${x}] = ${simulinkname}_Y.${outp};
+%set $x = $x + 1
+%end for	
+//
+	return errorMsg;
+
+// ---
+
+} /* end rtOneStep */
+
+
+/* Function: initiateController
+=============================================================
+*
+* Abstract:
+*
+Execute model on a generic target such as a workstation.
+*/
+char * initiateController()
+{
+    const char *status;
+    /******************************
+     * MathError Handling for BC++ *
+     ******************************/
+#ifdef BORLAND
+    signal(SIGFPE, (fptr)divideByZero);
+#endif
+
+    /****************************
+     * Initialize global memory *
+     ****************************/
+	//rtExtModeParseArgs(argc, argv, NULL);
+    (void)memset(&GBLbuf, 0, sizeof(GBLbuf));
+
+    /************************
+     * Initialize the model *
+     ************************/
+    rt_InitInfAndNaN(sizeof(real_T));
+
+    S = MODEL();
+    if (rtmGetErrorStatus(S) != NULL) {
+        (void)fprintf(stderr,"Error during model registration: %s\n",
+                      rtmGetErrorStatus(S));
+        exit(EXIT_FAILURE);
+		sprintf(errorMsg, "Error during model registration: %s", rtmGetErrorStatus(S));
+		return(errorMsg);
+    }
+	
+    rtmSetTFinal(S,RUN_FOREVER);
+
+    MdlInitializeSizes();
+    MdlInitializeSampleTimes();
+    
+    status = rt_SimInitTimingEngine(rtmGetNumSampleTimes(S),
+                                    rtmGetStepSize(S),
+                                    rtmGetSampleTimePtr(S),
+                                    rtmGetOffsetTimePtr(S),
+                                    rtmGetSampleHitPtr(S),
+                                    rtmGetSampleTimeTaskIDPtr(S),
+                                    rtmGetTStart(S),
+                                    &rtmGetSimTimeStep(S),
+                                    &rtmGetTimingData(S));
+
+    if (status != NULL) {
+        (void)fprintf(stderr,
+                "Failed to initialize sample time engine: %s\n", status);
+        exit(EXIT_FAILURE);
+		sprintf(errorMsg, "Failed to initialize sample time engine: %s", status);
+		return errorMsg;
+    }
+    rt_CreateIntegrationData(S);
+
+#ifdef UseMMIDataLogging
+    rt_FillStateSigInfoFromMMI(rtmGetRTWLogInfo(S),&rtmGetErrorStatus(S));
+    rt_FillSigLogInfoFromMMI(rtmGetRTWLogInfo(S),&rtmGetErrorStatus(S));
+#endif
+    GBLbuf.errmsg = rt_StartDataLogging(rtmGetRTWLogInfo(S),
+                                        rtmGetTFinal(S),
+                                        rtmGetStepSize(S),
+                                        &rtmGetErrorStatus(S));
+    if (GBLbuf.errmsg != NULL) {
+        (void)fprintf(stderr,"Error starting data logging: %s\n",GBLbuf.errmsg);	
+        exit(EXIT_FAILURE);
+		sprintf(errorMsg, "Error starting data logging: %s\n",GBLbuf.errmsg);
+		return errorMsg;
+    }
+
+    rtExtModeCheckInit(rtmGetNumSampleTimes(S));
+    rtExtModeWaitForStartPkt(rtmGetRTWExtModeInfo(S),
+                             rtmGetNumSampleTimes(S),
+                             (boolean_T *)&rtmGetStopRequested(S));
+
+    (void)printf("\n** starting the model **\n");
+
+    MdlStart();
+    if (rtmGetErrorStatus(S) != NULL) {
+      GBLbuf.stopExecutionFlag = 1;
+    }
+    errorMsg[0] = 0;
+    return errorMsg;
+	/*
+	Initialization should be finished at this point
+	*/
+}
+
+
+
+char* performCleanup() {
+    /********************
+     * Cleanup and exit *
+     ********************/
+#ifdef UseMMIDataLogging
+    rt_CleanUpForStateLogWithMMI(rtmGetRTWLogInfo(S));
+    rt_CleanUpForSigLogWithMMI(rtmGetRTWLogInfo(S));
+#endif
+    rt_StopDataLogging(MATFILE,rtmGetRTWLogInfo(S));
+
+    rtExtModeShutdown(rtmGetNumSampleTimes(S));
+
+    if (GBLbuf.errmsg) {
+        (void)fprintf(stderr,"%s\n",GBLbuf.errmsg);
+        exit(EXIT_FAILURE);
+		sprintf(errorMsg, "%s", GBLbuf.errmsg);
+		return errorMsg;
+    }
+
+    if (rtmGetErrorStatus(S) != NULL) {
+        (void)fprintf(stderr,"ErrorStatus set: \"%s\"\n", rtmGetErrorStatus(S));
+        exit(EXIT_FAILURE);
+		sprintf(errorMsg,"%s", rtmGetErrorStatus(S));
+		return errorMsg;
+    }
+
+    if (GBLbuf.isrOverrun) {
+        (void)fprintf(stderr,
+                      "%s: ISR overrun - base sampling rate is too fast\n",
+                      QUOTE(MODEL));
+        exit(EXIT_FAILURE);
+		sprintf(errorMsg, "%s: ISR overrun - base sampling rate is too fast",QUOTE(MODEL));
+		return errorMsg;
+    }
+
+	return errorMsg;
+
+} /* end main */
+
+

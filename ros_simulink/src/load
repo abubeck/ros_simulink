@@ -1,0 +1,36 @@
+#!/usr/bin/env python
+import roslib
+import sys
+import time
+import os
+import xmlrpclib
+
+class rosmatlabclient:
+	def __init__(self):
+		self.server = xmlrpclib.ServerProxy("http://localhost:14441")
+	def load(self, pkgname):
+		pkgloc = roslib.packages.get_pkg_dir(pkgname)
+		print pkgloc
+		resp1 = self.server.matlab.eval("cd "+ pkgloc.rstrip() + "/simulink")
+		time.sleep(0.5)
+		resp1 = self.server.matlab.eval("open_system('" + pkgname + "')")
+	def load(self, dirname, filename):
+		resp1 = self.server.matlab.eval("cd "+ dirname)
+		time.sleep(0.5)
+		resp1 = self.server.matlab.eval("open_system('" + filename + "')")
+		
+
+if __name__ == "__main__":
+	client = rosmatlabclient()	
+	if len(sys.argv) == 2:
+		mdl_filename = sys.argv[1].find(".mdl")
+		if(sys.argv[1].endswith('.mdl')):
+			[dirname, filename] = sys.argv[1].rsplit("/", 1)
+			print os.getcwd()+"/"+dirname
+			print filename.replace(".mdl", "")
+			client.load(os.getcwd()+"/"+dirname, filename)		
+		else:
+			client.load(sys.argv[1])
+			
+	else:
+		print "usage: load pkgname|mdl_file_name"

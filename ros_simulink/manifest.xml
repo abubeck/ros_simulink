@@ -1,0 +1,21 @@
+<package>
+  <description brief="ros_simulink">
+	Integration of the simulink real time workshop toolchain with ros. Allows you to create simulink controllers and connect them with ros topics for input and output.
+  </description>
+  <author>Alexander Bubeck, email:alexander.bubeck@ipa.fraunhofer.de</author>
+  <license>LGPL</license>
+  <review status="unreviewed" notes=""/>
+  <url>http://ros.org/wiki/ros_simulink</url>
+  <depend package="roslang"/>
+  <depend package="rospy"/>
+  <depend package="rosjava"/>
+  <export>
+    <roslang cmake="${prefix}/cmake/rossimulink.cmake"/>
+  </export>
+
+ <rosdep name="openjdk-6-jdk"/> 
+ <rosdep name="libxmlrpc3-server-java"/>
+ <rosdep name="python-cheetah"/>
+</package>
+
+

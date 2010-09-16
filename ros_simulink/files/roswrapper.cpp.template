@@ -1,0 +1,89 @@
+#compiler-settings
+directiveStartToken = %
+commentStartToken = #+#
+#end compiler-settings
+
+#include <ros/ros.h>
+#include <rtw/grt_main.h>
+#include <std_msgs/Float64MultiArray.h>
+
+
+class ${simulinkname}ROS{
+public:
+	ros::NodeHandle n;
+%for $inp in $inputblocks:
+	ros::Subscriber ${inp}_sub ;
+%end for
+	
+%for $outp in $outputblocks:
+	ros::Publisher ${outp}_pub ;
+%end for
+
+	double inputArgs[${numofinputs}];
+	double outputArgs[${numofoutputs}];
+
+	${simulinkname}ROS()
+	{
+%for $inp in $inputblocks:
+		${inp}_sub = n.subscribe("${inp}", 100, &${simulinkname}ROS::${inp}_Callback, this);
+%end for
+
+%for $outp in $outputblocks:
+		${outp}_pub = n.advertise<std_msgs::Float64MultiArray>("${outp}", 100);
+%end for
+
+%set $x = 0
+%for $inp in $inputblocks:
+		inputArgs[${x}] = 0.0;
+%set $x = $x + 1
+%end for
+
+%set $x = 0
+%for $outp in $outputblocks:
+		outputArgs[${x}] = 0.0;
+%set $x = $x + 1
+%end for
+
+	}
+
+%set $x = 0
+%for $inp in $inputblocks:
+	void ${inp}_Callback(const std_msgs::Float64MultiArray& msg)
+	{
+		inputArgs[${x}] = msg.data[0];
+		ROS_INFO("Received something");
+	}
+%set $x = $x + 1
+%end for
+
+	void publishData()
+	{
+		std_msgs::Float64MultiArray msg;
+		msg.data.resize(1);
+%set $x = 0
+%for $outp in $outputblocks:
+		msg.data[0] = outputArgs[${x}];
+		${outp}_pub.publish(msg);
+%set $x = $x + 1
+%end for
+	}
+
+}; //${simulinkname}
+
+int main(int argc, char** argv)
+{
+	ros::init(argc, argv, "${simulinkname}");
+	initiateController();
+	${simulinkname}ROS ${simulinkname}_node;
+	sleep(1);
+	ros::Rate loop_rate(5); // Hz
+	while(${simulinkname}_node.n.ok())
+ 	{ 
+		printf("%s\n", getControllerOutput(${numofinputs}, ${simulinkname}_node.inputArgs, ${numofoutputs}, ${simulinkname}_node.outputArgs));
+		${simulinkname}_node.publishData();
+		ros::spinOnce();
+ 		loop_rate.sleep();
+ 	} 
+	performCleanup();
+	return 0; 
+} 

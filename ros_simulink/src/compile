@@ -1,0 +1,40 @@
+#!/usr/bin/env python
+
+import roslib
+import sys
+import subprocess
+import time
+import os
+import shutil
+import xmlrpclib
+
+class rosmatlabclient:
+	def __init__(self):
+		self.server = xmlrpclib.ServerProxy("http://localhost:14441")
+
+	def compile(self, pkgname):
+		pkgloc = roslib.packages.get_pkg_dir(pkgname)
+		print pkgloc
+		resp1 = self.server.matlab.eval("cd "+ pkgloc.rstrip() + "/simulink")
+		time.sleep(0.5)
+		resp1 = self.server.matlab.eval("rtwbuild('" + pkgname + "')")
+		time.sleep(0.5)
+		if os.path.exists(pkgloc.rstrip()+"/rtw/slprj"):
+			shutil.rmtree(pkgloc.rstrip()+"/rtw/slprj")
+		shutil.move(pkgloc.rstrip()+"/simulink/slprj", pkgloc.rstrip()+"/rtw/slprj")
+		if os.path.exists(pkgloc.rstrip()+"/rtw/"+pkgname+"_grt_rtw"):
+			shutil.rmtree(pkgloc.rstrip()+"/rtw/"+pkgname+"_grt_rtw")
+		shutil.move(pkgloc.rstrip()+"/simulink/"+pkgname+"_grt_rtw", pkgloc.rstrip()+"/rtw/"+pkgname+"_grt_rtw")
+#das war nen hack fuer den cmake support --> schau mal ob du das besser hinbekommst
+		#d = pkgloc.rstrip()+"/build/rtw/"
+		#if not os.path.exists(d):
+		#		os.makedirs(d)
+		#shutil.copy(pkgloc.rstrip()+"/rtw/"+pkgname+"_grt_rtw", pkgloc.rstrip()+"/build/rtw/"+pkgname+"_grt_rtw")
+
+
+if __name__ == "__main__":
+	client = rosmatlabclient()	
+	if len(sys.argv) == 2:
+		client.compile(sys.argv[1])
+	else:
+		print "compile pkgname"
