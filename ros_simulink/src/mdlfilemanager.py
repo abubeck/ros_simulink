@@ -9,6 +9,7 @@ import pprint
 import subprocess
 import time
 import os
+import shutil
 from pyparsing import *
 from Cheetah.Template import Template
 
@@ -257,8 +258,10 @@ if __name__ == "__main__":
 
 			man.genNoSpaceVariables()
 			man.FillAndWriteTemplates(roslib.packages.get_pkg_dir("ros_simulink")+"/files/grt_main.c.template", pkgloc.rstrip()+"/rtw/grt_main.c")
+			shutil.copyfile(roslib.packages.get_pkg_dir("ros_simulink")+"/files/grt_main.h", pkgloc.rstrip()+"/rtw/grt_main.h")
 			if(len(sys.argv) == 3):
 				man.FillAndWriteTemplates(roslib.packages.get_pkg_dir("ros_simulink")+"/files/grt_main.c.template", sys.argv[2]+"/rtw/grt_main.c")
+				shutil.copyfile(roslib.packages.get_pkg_dir("ros_simulink")+"/files/grt_main.h", sys.argv[2]+"/rtw/grt_main.h")			
 			print "Simulink wrapper generated"
 			
 		
