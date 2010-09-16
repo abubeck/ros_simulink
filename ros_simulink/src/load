@@ -8,7 +8,7 @@ import xmlrpclib
 class rosmatlabclient:
 	def __init__(self):
 		self.server = xmlrpclib.ServerProxy("http://localhost:14441")
-	def load(self, pkgname):
+	def loadpkg(self, pkgname):
 		pkgloc = roslib.packages.get_pkg_dir(pkgname)
 		print pkgloc
 		resp1 = self.server.matlab.eval("cd "+ pkgloc.rstrip() + "/simulink")
@@ -30,7 +30,7 @@ if __name__ == "__main__":
 			print filename.replace(".mdl", "")
 			client.load(os.getcwd()+"/"+dirname, filename)		
 		else:
-			client.load(sys.argv[1])
+			client.loadpkg(sys.argv[1])
 			
 	else:
 		print "usage: load pkgname|mdl_file_name"
