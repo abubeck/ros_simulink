@@ -128,17 +128,23 @@ extern void MdlTerminate(void);
 
 
 #if NCSTATES > 0
+
 #ifdef __cplusplus
 
 extern "C" {
 
 #endif
+
+
 	extern void rt_ODECreateIntegrationData(RTWSolverInfo *si);
 	extern void rt_ODEUpdateContinuousStates(RTWSolverInfo *si);
+
 #ifdef __cplusplus
 
 }
 #endif
+
+
 
 # define rt_CreateIntegrationData(S) \
 	  rt_ODECreateIntegrationData(rtmGetRTWSolverInfo(S));

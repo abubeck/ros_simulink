@@ -39,7 +39,7 @@ macro(gen_simulink_bin BIN_NAME MDLFILE)
    rtw/grt_main.c
    )
 
- rosbuild_add_compile_flags(simulink_gen -DUSE_RTMODEL -O0 -ffloat-store -fPIC -m32 -DMODEL=cob_testslinkcontroller -DRT -DNUMST=2 -DTID01EQ=1 -DNCSTATES=1 -DUNIX -DMT=0 -DHAVESTDIO -DUSE_GENERATED_SOLVER -URT_MALLOC)
+ rosbuild_add_compile_flags(simulink_gen -DUSE_RTMODEL -O0 -ffloat-store -fPIC -m32 -DMODEL=${PROJECT_NAME} -DRT -DNUMST=2 -DTID01EQ=1 -DNCSTATES=1 -DUNIX -DMT=0 -DHAVESTDIO -DUSE_GENERATED_SOLVER -URT_MALLOC)
 
  rosbuild_add_executable(${BIN_NAME} ros/roswrapper.cpp)
  target_link_libraries(${BIN_NAME} simulink_gen)
