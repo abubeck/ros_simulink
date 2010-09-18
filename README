@@ -1,0 +1,25 @@
+Integration of the mathworks simulink real time workshop toolchain with ros. Allows you to create simulink controllers and connect them with ros topics for input and output.
+
+Provided tools:
+rosmatlab:
+	rosrun ros_simulink matlab
+	launches matlab with an additional xmlrpc server 
+	to remote control simulink from the ros toolchain
+
+load:
+	rosrun ros_simulink load <mdl file | ros_package_name>
+
+compile:
+	rosrun ros_simulink compile <ros_package_name>
+	compiles the simulink model in “package_dir/simulink/package_name.mdl” 
+	to the “package_dir/rtw/” directory and generates ros 
+	code for interfacing the rtw c-files
+
+roscreate-simulinkpkg
+	creates ros package with dependencies, file system setup 
+	and a simulink file with rtw settings and simulation 
+	settings ready to go
+
+cmake integration:
+	use the cmake statement to generate ros_simulink binary
+	gen_simulink_bin(executable_name mdl-file)
